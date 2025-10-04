@@ -1,0 +1,79 @@
+name: Build Release APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Unzip project if ZIP exists
+      run: |
+        if [ -f nsfw_blur_prototype_v4_with_workflow.zip ]; then
+          unzip -o nsfw_blur_prototype_v4_with_workflow.zip -d project_root
+        else
+          echo "No zip found, assuming project files are in repo root."
+        fi
+
+    - name: List files (debug)
+      run: |
+        echo "===== root files ====="
+        ls -la
+        echo "===== project_root files ====="
+        ls -la project_root || true
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        api-levels: 33
+        components: build-tools;33.0.2,platform-tools
+
+    - name: Make gradlew executable if present
+      run: |
+        if [ -f gradlew ]; then chmod +x gradlew; fi
+        if [ -f project_root/gradlew ]; then chmod +x project_root/gradlew; fi
+
+    - name: (Optional) Generate keystore for signing
+      run: |
+        # generate keystore only if not exist
+        if [ ! -f protect-yourself-key.jks ]; then
+          keytool -genkeypair -v -keystore protect-yourself-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias glitch -storepass glitch -keypass glitch -dname "CN=Glitch, OU=Dev, O=ProtectYourself, L=Cairo, S=Cairo, C=EG"
+        fi
+
+    - name: Build Release APK (use wrapper if present)
+      run: |
+        # choose build dir: if we unzipped into project_root and that folder contains gradlew/app, use it
+        if [ -f project_root/gradlew ]; then
+          cd project_root
+          ./gradlew assembleRelease --no-daemon
+        elif [ -f gradlew ]; then
+          ./gradlew assembleRelease --no-daemon
+        else
+          echo "No gradlew found; attempt system gradle (may be slower)."
+          sudo apt-get update
+          sudo apt-get install -y gradle
+          if [ -d project_root ]; then
+            cd project_root
+            gradle assembleRelease
+          else
+            gradle assembleRelease
+          fi
+        fi
+
+    - name: Upload built APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: ProtectYourself-Release
+        path: |
+          project_root/app/build/outputs/apk/release/*.apk
+          app/build/outputs/apk/release/*.apk
